@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html>
+<meta charset="utf-8">
+<head>
+<script src="https://d3js.org/d3.v4.min.js"></script>
+<script src="https://raw.githubusercontent.com/synesenom/dl/master/dl.min.js"></script>
+<script src="lib/help.js"></script>
+<script src="lib/dnd.js"></script>
+<title>network illustration</title>
+<style>
+html, body{
+	font-family: 'Avenir', 'Arial', sans-serif;
+}
+</style>
+</head>
+<body>
+	<svg></svg>
+</body>
+<script>
+var width = 1000;
+var height = 600;
+var simulation = null;
+
+function netify(from, data) {
+	var g = {nodes: [], links: []};
+	var nodes = {};
+	function add(n) {
+		if (!nodes[n]) {
+			nodes[n] = 1;
+			g.nodes.push({id: n});
+		}
+	}
+	switch (from) {
+		case "csv":
+			data.forEach(function(d) {
+				var s = +d.source;
+				var t = +d.target;
+				var v = +d.value;
+				g.links.push({source: s, target: t, value: v});
+				add(s);
+				add(t);
+			});
+			break;
+		default:
+			break;
+	}
+	return g;
+}
+
+function truncate(links, threshold) {
+	var truncated_links = [];
+	links.forEach(function(l) {
+		if (l.value >= threshold)
+			truncated_links.push(l);
+	});
+	return truncated_links;
+}
+
+// Drag behavior
+function dragstarted(d) {
+	if (!d3.event.active) simulation.alphaTarget(0.3).restart();
+	d.fx = d.x;
+	d.fy = d.y;
+}
+
+function dragged(d) {
+	d.fx = d3.event.x;
+	d.fy = d3.event.y;
+}
+
+function dragended(d) {
+	if (!d3.event.active) simulation.alphaTarget(0);
+	d.fx = null;
+	d.fy = null;
+}
+
+function render(data, threshold) {
+	// Add SVG
+	var svg = d3.select("svg").html("")
+				.attr("width", width)
+				.attr("height", height);
+
+	// Make force layout
+	simulation = d3.forceSimulation()
+						.force("link", d3.forceLink()
+							.id(function(d) { return d.id; })
+							.strength(0.1))
+						.force("charge", d3.forceManyBody().strength(-2))
+						.force("center", d3.forceCenter(width / 2, height / 2))
+						.force("collide", d3.forceCollide(10));
+
+	// Add links
+	var tlinks = truncate(data.links, threshold);
+	var link = svg.append("g")
+				.selectAll("line")
+				.data(tlinks)
+			.enter().append("line")
+    			.style("stroke", "gray")
+    			.attr("stroke-width", function(d) { return Math.sqrt(d.value)/10; })
+    			.style("opacity", 0.4);
+
+	// Add nodes
+	var degree = {};
+	data.nodes.forEach(function(n) {
+		degree[n.id] = 0;
+	});
+	data.links.forEach(function(l) {
+		degree[l.source]++;
+		degree[l.target]++;
+	});
+	var yearMin = d3.min(data.nodes, function(d) { return d.year; });
+	var yearMax = d3.max(data.nodes, function(d) { return d.year; });
+	var node = svg.append("g")
+				.selectAll("circle")
+				.data(data.nodes)
+			.enter().append("circle")
+				.attr("id", function(d) { return d.id; })
+				.attr("r", function(d) { return 1+Math.log(degree[d.id]+1); })
+				.style("fill", function(d) { return d.focus ? "crimson" : "black"; })
+				.style("stroke", "white")
+				.style("stroke-width", 1.5)
+				.call(d3.drag()
+				.on("start", dragstarted)
+				.on("drag", dragged)
+				.on("end", dragended));
+
+    // Setup simulation
+	simulation
+		.nodes(data.nodes)
+		.on("tick", ticked);
+
+	simulation.force("link")
+		.links(tlinks);
+	function ticked() {
+		link
+			.attr("x1", function(d) { return d.source.x; })
+			.attr("y1", function(d) { return d.source.y; })
+			.attr("x2", function(d) { return d.target.x; })
+			.attr("y2", function(d) { return d.target.y; });
+		node
+			.attr("cx", function(d) { return d.x; })
+			.attr("cy", function(d) { return d.y; });
+	}
+}
+
+function parse_csv(data) {
+	var csv = [];
+	d3.dsvFormat(",").parse(data).forEach(function(d, i) {
+		csv.push({source: d.source, target: d.target, value: +d.value});
+	});
+	return netify("csv", csv);
+}
+
+// save
+d3.select(document).on("keydown", function() {
+	switch(d3.event.which) {
+		case 83:
+			dl.png("svg", "figure.png", {width: 2*width});
+			break;
+		case 69:
+			dl.eps("svg", "figure.eps");
+			break;
+		case 74:
+			dl.graph("svg", "figure.json");
+			break;
+	}
+});
+
+// help menu
+Help.content("<b>layout</b>"
+	+ "<br><br>A network layout application for quickly drawing and exporting networks"
+	+ "<br><br><b>import</b>"
+	+ "<br>Files can be imported by simply dropping them on the browser. Supported formats: "
+	+ "<code>csv</code> (header must include <code>source</code>, <code>target</code> and <code>value</code>)"
+	+ "<br><br><b>export</b>"
+	+ "<br><i>h</i> pops up this help menu."
+	+ "<br><i>p</i> exports network in PNG."
+	+ "<br><i>e</i> exports network in EPS."
+	+ "<br><i>j</i> exports network in JSON.");
+
+// drag-and-drop
+dnd.init(function(content, filename){
+	var graph = parse_csv(content, "csv");
+	render(graph, 1);
+}, {
+	overlay: {
+		"background-color": "rgba(255, 255, 255, 0.9)"
+	}
+});
+</script>
+</html>
