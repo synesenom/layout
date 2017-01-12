@@ -3,25 +3,132 @@
 <meta charset="utf-8">
 <head>
 <script src="https://d3js.org/d3.v4.min.js"></script>
-<script src="https://raw.githubusercontent.com/synesenom/dl/master/dl.min.js"></script>
 <script src="lib/help.js"></script>
 <script src="lib/dnd.js"></script>
+<script src="lib/dl.min.js"></script>
 <title>network illustration</title>
 <style>
-html, body{
+html{
+	margin: 0;
+	padding: 0;
 	font-family: 'Avenir', 'Arial', sans-serif;
+}
+body {
+	width: 1200px;
+	margin: 0 auto;
+	margin-top: 20px;
+}
+svg {
+	width: 900px;
+	height: 600px;
+}
+#controls {
+	width: 190px;
+	padding-left: 10px;
+	padding-right: 10px;
+	float: right;
+}
+.title {
+	width: 100%;
+	margin-top: 10px;
+	margin-bottom: 5px;
+	font-weight: 700;
+}
+.control {
+	width: 170px;
+	margin-bottom: 10px;
+}
+.control-label {
+	position: relative;
+	float: left;
+}
+.control-value {
+	position: relative;
+	float: right;
+}
+input[type='range'] {
+	width: 170px;
+}
+.button {
+	display: inline-block;
+	min-width: 8pt;
+	padding: 3pt 5pt 3pt 5pt;
+	cursor: pointer;
+	border-radius: 2pt;
+	font-size: 0.8em;
+	border: 1px solid dodgerblue;
+}
+.button:hover {
+	color: white;
+	background-color: dodgerblue;
 }
 </style>
 </head>
 <body>
 	<svg></svg>
+	<div id="controls">
+		<!-- parameters -->
+		<div class="title">control</div>
+		<div class="control" id="threshold">
+			<div class="control-label">link threshold: </div>
+			<div class="control-value">10</div>
+			<div class="control-input">
+				<input type="range" id="threshold-input" min="0" max="100" value="10">
+			</div>
+		</div>
+
+		<div class="control" id="gravity-strength">
+			<div class="control-label">gravity: </div>
+			<div class="control-value">0.001</div>
+			<div class="control-input">
+				<input type="range" id="gravity-strength-input" min="0.001" max="0.1" step="0.001" value="0.001">
+			</div>
+		</div>
+
+		<div class="control" id="charge-strength">
+			<div class="control-label">charge: </div>
+			<div class="control-value">-1</div>
+			<div class="control-input">
+				<input type="range" id="charge-strength-input" min="-20" max="-0.05" value="-1">
+			</div>
+		</div>
+
+		<div class="control" id="link-strength">
+			<div class="control-label">link: </div>
+			<div class="control-value">0.001</div>
+			<div class="control-input">
+				<input type="range" id="link-strength-input" min="0.001" max="1" step="0.001" value="0.001">
+			</div>
+		</div>
+
+		<!-- exports -->
+		<div class="title">export</div>
+		<div class="button" id="png" onclick="save('png')">png</div>
+		<div class="button" id="eps" onclick="save('eps')">eps</div>
+		<div class="button" id="json" onclick="save('json')">json</div>
+	</div>
 </body>
 <script>
-var width = 1000;
+var width = 900;
 var height = 600;
 var simulation = null;
+var graph = null;
+var degree = {};
 
-function netify(from, data) {
+function update_degrees(nodes, links) {
+	degree = {_max_: 1};
+	nodes.forEach(function(n) {
+		degree[n.id] = 1;
+	});
+	links.forEach(function(l) {
+		degree[l.source]++;
+		degree._max_ = Math.max(degree._max_, degree[l.source]);
+		degree[l.target]++;
+		degree._max_ = Math.max(degree._max_, degree[l.target]);
+	});
+}
+
+function netify(data) {
 	var g = {nodes: [], links: []};
 	var nodes = {};
 	function add(n) {
@@ -30,20 +137,18 @@ function netify(from, data) {
 			g.nodes.push({id: n});
 		}
 	}
-	switch (from) {
-		case "csv":
-			data.forEach(function(d) {
-				var s = +d.source;
-				var t = +d.target;
-				var v = +d.value;
-				g.links.push({source: s, target: t, value: v});
-				add(s);
-				add(t);
-			});
-			break;
-		default:
-			break;
-	}
+	var vmax = 0;
+	data.forEach(function(d) {
+		var s = +d.source;
+		var t = +d.target;
+		var v = +d.value;
+		vmax = Math.max(vmax, v);
+		g.links.push({source: s, target: t, value: v});
+		add(s);
+		add(t);
+	});
+	console.log(g.links);
+	g.attr = {maxValue: vmax};
 	return g;
 }
 
@@ -74,72 +179,89 @@ function dragended(d) {
 	d.fy = null;
 }
 
-function render(data, threshold) {
-	// Add SVG
-	var svg = d3.select("svg").html("")
-				.attr("width", width)
-				.attr("height", height);
+function setup(data) {
+	d3.select("#threshold-input").attr("max", data.attr.maxValue);
+}
 
-	// Make force layout
-	simulation = d3.forceSimulation()
+function copy(g) {
+	var gcopy = {nodes: [], links: []};
+	g.nodes.forEach(function(n) {
+		gcopy.nodes.push({id: n.id});
+	});
+	g.links.forEach(function(l) {
+		gcopy.links.push({source: l.source, target: l.target, value: l.value});
+	});
+	return gcopy;
+}
+
+function render(data, threshold) {
+	// Graph is passed, re-render
+	if (data) {
+		// copy graph
+		var g = copy(data);
+
+		// make SVG
+		var svg = d3.select("svg").html("")
+			.attr("width", width)
+			.attr("height", height);
+
+		// setup force
+		simulation = d3.forceSimulation()
 						.force("link", d3.forceLink()
 							.id(function(d) { return d.id; })
 							.strength(0.1))
 						.force("charge", d3.forceManyBody().strength(-2))
 						.force("center", d3.forceCenter(width / 2, height / 2))
-						.force("collide", d3.forceCollide(10));
+						.force("collision", d3.forceCollide(10).strength(0))
+						.force("x", d3.forceX(width / 2).strength(0.01))
+						.force("y", d3.forceY(height / 2).strength(0.01));
 
-	// Add links
-	var tlinks = truncate(data.links, threshold);
-	var link = svg.append("g")
-				.selectAll("line")
-				.data(tlinks)
-			.enter().append("line")
-    			.style("stroke", "gray")
-    			.attr("stroke-width", function(d) { return Math.sqrt(d.value)/10; })
-    			.style("opacity", 0.4);
+		// Add links
+		var tlinks = truncate(g.links, threshold);
+		update_degrees(g.nodes, tlinks);
+		var link = svg.append("g")
+					.selectAll("line")
+					.data(tlinks)
+				.enter().append("line")
+	    			.style("stroke", "gray")
+	    			.attr("stroke-width", function(d) { return Math.sqrt(d.value)/10; })
+	    			.style("opacity", 0.4);
 
-	// Add nodes
-	var degree = {};
-	data.nodes.forEach(function(n) {
-		degree[n.id] = 0;
-	});
-	data.links.forEach(function(l) {
-		degree[l.source]++;
-		degree[l.target]++;
-	});
-	var yearMin = d3.min(data.nodes, function(d) { return d.year; });
-	var yearMax = d3.max(data.nodes, function(d) { return d.year; });
-	var node = svg.append("g")
-				.selectAll("circle")
-				.data(data.nodes)
-			.enter().append("circle")
-				.attr("id", function(d) { return d.id; })
-				.attr("r", function(d) { return 1+Math.log(degree[d.id]+1); })
-				.style("fill", function(d) { return d.focus ? "crimson" : "black"; })
-				.style("stroke", "white")
-				.style("stroke-width", 1.5)
-				.call(d3.drag()
-				.on("start", dragstarted)
-				.on("drag", dragged)
-				.on("end", dragended));
+		// Add nodes
+		var yearMin = d3.min(data.nodes, function(d) { return d.year; });
+		var yearMax = d3.max(data.nodes, function(d) { return d.year; });
+		var node = svg.append("g")
+					.selectAll("circle")
+					.data(g.nodes)
+				.enter().append("circle")
+					.attr("id", function(d) { return d.id; })
+					.attr("r", function(d) { return 3+7*Math.log(degree[d.id]/degree._max_+1); })
+					.style("fill", function(d) { return d.focus ? "crimson" : "black"; })
+					.style("stroke", "white")
+					.style("stroke-width", 1.5)
+					.call(d3.drag()
+					.on("start", dragstarted)
+					.on("drag", dragged)
+					.on("end", dragended));
 
-    // Setup simulation
-	simulation
-		.nodes(data.nodes)
-		.on("tick", ticked);
-
-	simulation.force("link")
-		.links(tlinks);
-	function ticked() {
-		link
-			.attr("x1", function(d) { return d.source.x; })
-			.attr("y1", function(d) { return d.source.y; })
-			.attr("x2", function(d) { return d.target.x; })
-			.attr("y2", function(d) { return d.target.y; });
-		node
-			.attr("cx", function(d) { return d.x; })
-			.attr("cy", function(d) { return d.y; });
+	    // Setup simulation
+		function tick() {
+			link
+				.attr("x1", function(d) { return d.source.x; })
+				.attr("y1", function(d) { return d.source.y; })
+				.attr("x2", function(d) { return d.target.x; })
+				.attr("y2", function(d) { return d.target.y; });
+			node
+				.attr("cx", function(d) { return d.x; })
+				.attr("cy", function(d) { return d.y; });
+		}
+		simulation
+			.nodes(g.nodes)
+			.on("tick", tick)
+			.force("link")
+			.links(tlinks);
+	} else {
+	  	simulation.restart();
 	}
 }
 
@@ -148,13 +270,27 @@ function parse_csv(data) {
 	d3.dsvFormat(",").parse(data).forEach(function(d, i) {
 		csv.push({source: d.source, target: d.target, value: +d.value});
 	});
-	return netify("csv", csv);
+	return netify(csv);
+}
+
+function save(format) {
+	switch(format) {
+		case "png":
+			dl.png("svg", "figure.png", {width: 2*width});
+			break;
+		case "eps":
+			dl.eps("svg", "figure.eps");
+			break;
+		case "json":
+			dl.graph("svg", "figure.json");
+			break;
+	}
 }
 
 // save
 d3.select(document).on("keydown", function() {
 	switch(d3.event.which) {
-		case 83:
+		case 80:
 			dl.png("svg", "figure.png", {width: 2*width});
 			break;
 		case 69:
@@ -180,12 +316,39 @@ Help.content("<b>layout</b>"
 
 // drag-and-drop
 dnd.init(function(content, filename){
-	var graph = parse_csv(content, "csv");
+	graph = parse_csv(content, "csv");
+	setup(graph);
 	render(graph, 1);
 }, {
 	overlay: {
 		"background-color": "rgba(255, 255, 255, 0.9)"
 	}
 });
+
+d3.select("#threshold-input").on("input", function() {
+	var v = +this.value;
+	d3.select("#threshold > .control-value").text(v);
+  	d3.select("#threshold-input").property("value", v);
+
+  	// re-render
+  	render(graph, v);
+});
+
+function adjust(control, forces) {
+	d3.select("#" + control + "-strength-input").on("input", function() {
+		var v = +this.value;
+		d3.select("#" + control + "-strength > .control-value").text(v);
+	  	d3.select("#" + control + "-strength-input").property("value", v);
+
+	  	// update simulation
+	  	forces.forEach(function(f) {
+	  		simulation.force(f).strength(v);
+	  	});
+	  	render();
+	});
+}
+adjust("charge", ["charge"]);
+adjust("link", ["link"]);
+adjust("gravity", ["x", "y"]);
 </script>
 </html>
