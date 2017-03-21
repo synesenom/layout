@@ -73,7 +73,7 @@ input[type='range'] {
 			<div class="control-label">link threshold: </div>
 			<div class="control-value">10</div>
 			<div class="control-input">
-				<input type="range" id="threshold-input" min="0" max="100" value="10">
+				<input type="range" id="threshold-input" min="0" max="100" step="1" value="10">
 			</div>
 		</div>
 
@@ -240,9 +240,10 @@ function render(data, threshold) {
 					.style("stroke", "white")
 					.style("stroke-width", 1.5)
 					.call(d3.drag()
-					.on("start", dragstarted)
-					.on("drag", dragged)
-					.on("end", dragended));
+						.on("start", dragstarted)
+						.on("drag", dragged)
+						.on("end", dragended)
+					);
 
 	    // Setup simulation
 		function tick() {
@@ -267,7 +268,7 @@ function render(data, threshold) {
 
 function parse_csv(data) {
 	var csv = [];
-	d3.dsvFormat(",").parse(data).forEach(function(d, i) {
+	d3.dsvFormat(" ").parse(data).forEach(function(d, i) {
 		csv.push({source: d.source, target: d.target, value: +d.value});
 	});
 	return netify(csv);
@@ -345,6 +346,7 @@ function adjust(control, forces) {
 	  		simulation.force(f).strength(v);
 	  	});
 	  	render();
+	  	simulation.alphaTarget(0.3).restart();
 	});
 }
 adjust("charge", ["charge"]);
